@@ -1,5 +1,6 @@
 import * as clack from '@clack/prompts';
 import type { Issue, IssueInput, Project } from '../core/model.js';
+import { clean } from './layout.js';
 
 export class CancelledError extends Error {
   constructor() { super('Cancelled.'); }
@@ -31,21 +32,21 @@ export async function selectProject(projects: Project[]): Promise<Project> {
 
 export async function edit(issue: Issue): Promise<Partial<IssueInput>> {
   const field = answer(await clack.select({
-    message: 'What would you like to edit?',
+    message: `What would you like to edit? (#${issue.number} · ${clean(issue.title)})`,
     options: [
       { value: 'title', label: 'Title' },
       { value: 'description', label: 'Description' },
-      { value: 'priority', label: 'Priority' },
+      { value: 'priority', label: 'low / normal / high' },
     ],
   }));
   if (field === 'title') return { title: await text('Title', issue.title) };
   if (field === 'description') return { description: await text('Description (empty clears it)', issue.description ?? '', false) };
   return { priority: answer(await clack.select({
-    message: 'Priority', initialValue: issue.priority,
+    message: 'Select low, normal, or high', initialValue: issue.priority,
     options: [
-      { value: 'low' as const, label: 'Low' },
-      { value: 'normal' as const, label: 'Normal' },
-      { value: 'high' as const, label: 'High' },
+      { value: 'low' as const, label: 'low' },
+      { value: 'normal' as const, label: 'normal' },
+      { value: 'high' as const, label: 'high' },
     ],
   })) };
 }

@@ -1,66 +1,166 @@
 import pc from 'picocolors';
-import type { IssueSummary, Note, Project, ProjectPath } from '../core/model.js';
+import type { IssueSummary, Note, Priority, Project, ProjectPath, Status } from '../core/model.js';
+import { clean, displayWidth, pad, terminalWidth, wrap } from './layout.js';
 
 const color = pc.createColors(pc.isColorSupported && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env));
 
 function timestamp(value: string): string {
-  return new Date(value).toLocaleString();
+  const date = new Date(value);
+  return `${date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} · ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-// Keep user-supplied control sequences from changing the terminal's state.
-function clean(value: string): string {
-  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+function shortDate(value: string): string {
+  const date = new Date(value);
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short',
+    ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
+
+function level(value: Priority): string {
+  return value === 'high' ? color.red(value) : value === 'normal' ? color.yellow(value) : color.dim(value);
+}
+
+function count(value: number, noun: string): string {
+  return `${value} ${noun}${value === 1 ? '' : noun === 'match' ? 'es' : 's'}`;
 }
 
 export function reference(issue: IssueSummary): string {
   return `${clean(issue.projectName)}:${issue.number}`;
 }
 
-function row(issue: IssueSummary, all: boolean): string {
-  const label = all ? reference(issue) : `#${issue.number}`;
-  const priority = issue.priority === 'high' ? color.red('HIGH')
-    : issue.priority === 'normal' ? color.yellow('NORMAL') : color.dim('LOW');
-  const title = issue.status === 'done' ? color.green(clean(issue.title)) : clean(issue.title);
-  return `  ${color.cyan(label)}  ${priority}  ${title}  ${color.dim(timestamp(issue.createdAt))}`;
+export interface ListContext {
+  search?: string;
+  status?: Status;
+  priority?: Priority;
 }
 
-export function issueList(issues: IssueSummary[], all: boolean, project?: Project): string {
-  const lines = project ? [color.bold(color.cyan(clean(project.name)))] : [];
-  if (!issues.length) return [...lines, color.dim('No issues found.')].join('\n');
+export function issueList(issues: IssueSummary[], all: boolean, project?: Project,
+  context: ListContext = {}, width = terminalWidth()): string {
+  const scope = project ? clean(project.name) : 'All projects';
+  const open = issues.filter(issue => issue.status === 'open').length;
+  const filtered = context.search !== undefined || context.status !== undefined || context.priority !== undefined;
+  const summary = filtered ? count(issues.length, context.search !== undefined ? 'match' : 'result')
+    : `${count(issues.length, 'issue')} · ${open} open · ${issues.length - open} done`;
+  const heading = context.search !== undefined ? `Search "${clean(context.search)}"` : scope;
+  const metadata = [context.search !== undefined ? scope : undefined, context.status, context.priority, summary]
+    .filter(Boolean).join(' · ');
+  const lines = displayWidth(`${heading}  ${metadata}`) <= width
+    ? [`${color.bold(color.cyan(heading))}  ${color.dim(metadata)}`]
+    : [...wrap(heading, width).map(line => color.bold(color.cyan(line))),
+      ...wrap(metadata, width).map(line => color.dim(line))];
+
+  if (!issues.length) {
+    lines.push('', filtered ? 'No matching issues.' : 'No issues yet.',
+      ...wrap(filtered ? 'Try fewer search terms or remove a filter.' : 'Create one: pno add "Your first issue"', width)
+        .map(line => color.dim(line)));
+    return lines.join('\n');
+  }
+
+  const label = (issue: IssueSummary) => all ? reference(issue) : `#${issue.number}`;
+  const referenceWidth = Math.max(5, ...issues.map(issue => displayWidth(label(issue))));
+  const dateWidth = Math.max(7, ...issues.map(issue => displayWidth(shortDate(issue.createdAt))));
+  const titleWidth = Math.min(Math.max(20, ...issues.map(issue => displayWidth(clean(issue.title)))),
+    width - (2 + referenceWidth + 2 + 6 + 2 + 2 + dateWidth));
+  const stacked = titleWidth < 20;
+  let hasHeader = false;
+
   for (const status of ['open', 'done'] as const) {
     const group = issues.filter(issue => issue.status === status);
-    if (group.length) {
-      lines.push(status === 'done' ? color.green('DONE') : color.bold('OPEN'));
-      lines.push(...group.map(issue => row(issue, all)));
+    if (!group.length) continue;
+    lines.push('', status === 'done' ? color.green(`DONE · ${group.length}`) : color.bold(`OPEN · ${group.length}`));
+    if (!stacked && !hasHeader) {
+      lines.push(color.dim(`  ${pad('ISSUE', referenceWidth)}  ${' '.repeat(6)}  ${pad('TITLE', titleWidth)}  CREATED`));
+      hasHeader = true;
+    }
+    for (const issue of group) {
+      if (stacked) {
+        lines.push(...wrap(label(issue), width - 2).map(line => `  ${color.cyan(line)}`),
+          ...wrap(`${issue.priority} · created ${shortDate(issue.createdAt)}`, width - 2)
+            .map(line => `  ${color.dim(line)}`),
+          ...wrap(clean(issue.title), width - 2).map(line => `  ${line}`));
+      } else {
+        const title = wrap(clean(issue.title), titleWidth);
+        lines.push(`  ${pad(color.cyan(label(issue)), referenceWidth)}  ${pad(level(issue.priority), 6)}  ${pad(title[0]!, titleWidth)}  ${color.dim(shortDate(issue.createdAt))}`,
+          ...title.slice(1).map(line => `${' '.repeat(2 + referenceWidth + 2 + 6 + 2)}${line}`));
+      }
     }
   }
-  lines.push(color.dim(`${issues.length} issue${issues.length === 1 ? '' : 's'}`));
   return lines.join('\n');
 }
 
-export function issueDetail(issue: IssueSummary, notes: Note[] = []): string {
-  const lines = [row(issue, true), `Status: ${issue.status}`, color.dim(`Created: ${timestamp(issue.createdAt)}`),
-    color.dim(`Updated: ${timestamp(issue.updatedAt)}`)];
-  if (issue.description) lines.push('', clean(issue.description));
-  if (issue.createdCommit) lines.push(color.dim(`Creation commit: ${issue.createdCommit.slice(0, 8)}`));
-  if (issue.completedAt) lines.push(color.dim(`Completed: ${timestamp(issue.completedAt)}`));
-  if (issue.completedCommit) lines.push(color.dim(`Completion commit: ${issue.completedCommit.slice(0, 8)}`));
-  if (notes.length) lines.push('', color.bold('Notes'), ...notes.map(note =>
-    `  ${color.dim(timestamp(note.createdAt))}  ${clean(note.content)}`));
+export function issueDetail(issue: IssueSummary, notes: Note[] = [], width = terminalWidth()): string {
+  const header = `${reference(issue)} / ${issue.status} / ${issue.priority}`;
+  const lines = displayWidth(header) <= width
+    ? [`${color.cyan(reference(issue))} ${color.dim(`/ ${issue.status} /`)} ${level(issue.priority)}`]
+    : [...wrap(reference(issue), width).map(line => color.cyan(line)), `${issue.status} / ${level(issue.priority)}`];
+  lines.push(...wrap(clean(issue.title), width).map(line => color.bold(line)));
+  if (issue.description) lines.push('', color.bold('Description'),
+    ...wrap(clean(issue.description, true), width - 2).map(line => `  ${line}`));
+  lines.push('', color.bold(`Notes · ${notes.length}`));
+  if (!notes.length) lines.push(color.dim('  No notes yet.'));
+  else {
+    lines.push(color.dim('  │'));
+    for (const note of notes) {
+      const dates = wrap(timestamp(note.createdAt), width - 4);
+      lines.push(`  ${color.cyan('●')} ${color.dim(dates[0]!)}`,
+        ...dates.slice(1).map(line => `  ${color.dim('│')} ${color.dim(line)}`),
+        ...wrap(clean(note.content, true), width - 4).map(line => `  ${color.dim('│')} ${line}`),
+        color.dim('  │'));
+    }
+    lines[lines.length - 1] = color.dim('  ╵');
+  }
+  lines.push('');
+  const field = (label: string, value: string) => {
+    lines.push(...wrap(`${pad(label, 19)}${value}`, width).map(line => color.dim(line)));
+  };
+  field('Created', timestamp(issue.createdAt));
+  field('Updated', timestamp(issue.updatedAt));
+  if (issue.createdCommit) field('Git at creation', issue.createdCommit.slice(0, 8));
+  if (issue.completedAt) field('Completed', timestamp(issue.completedAt));
+  if (issue.completedCommit) field('Git at completion', issue.completedCommit.slice(0, 8));
   return lines.join('\n');
+}
+
+export function issueAction(action: string, issue: IssueSummary, detail?: string): string {
+  const ref = reference(issue);
+  return wrap(`✓ ${action} ${ref} · ${clean(detail ?? issue.title)}`, terminalWidth())
+    .map((line, index) => {
+      const styled = line.replace(ref, () => color.cyan(ref));
+      return index === 0 ? color.green(styled.slice(0, 1)) + styled.slice(1) : styled;
+    }).join('\n');
+}
+
+export function issueEdited(before: IssueSummary, after: IssueSummary): string {
+  const changes = [
+    before.title !== after.title ? 'title updated' : undefined,
+    before.description !== after.description ? (after.description ? 'description updated' : 'description cleared') : undefined,
+    before.priority !== after.priority ? `${before.priority} → ${after.priority}` : undefined,
+  ].filter(Boolean);
+  return issueAction(changes.length ? 'Updated' : 'Unchanged', after, changes.length ? changes.join(' · ') : undefined);
+}
+
+export function unchanged(issue: IssueSummary): string {
+  return wrap(`${reference(issue)} is already ${issue.status}.`, terminalWidth()).map(line => color.dim(line)).join('\n');
 }
 
 export function projectDetail(project: Project, paths: ProjectPath[]): string {
-  return [color.bold(color.cyan(clean(project.name))), color.dim(`ID: ${project.id}`),
-    ...(project.remote ? [`Remote: ${clean(project.remote)}`] : []),
-    ...paths.map(path => color.dim(clean(path.path)))].join('\n');
+  return [color.bold(color.cyan(`${clean(project.name)} · project ${project.id}`)), '',
+    ...(project.remote ? [`Remote  ${clean(project.remote)}`] : []),
+    ...paths.map((path, index) => `${index === 0 ? 'Paths   ' : '        '}${clean(path.path)}`)]
+    .join('\n');
 }
 
 export function projectList(projects: Project[]): string {
-  return projects.length ? projects.map(project => `${project.id}  ${color.cyan(clean(project.name))}`).join('\n')
-    : color.dim('No projects registered.');
+  if (!projects.length) return color.dim('No projects registered.');
+  const idWidth = Math.max(2, ...projects.map(project => String(project.id).length));
+  return [color.bold(color.cyan('Projects')) + `  ${color.dim(count(projects.length, 'project'))}`, '',
+    color.dim(`  ${pad('ID', idWidth)}  NAME`),
+    ...projects.map(project => `  ${pad(color.cyan(String(project.id)), idWidth)}  ${clean(project.name)}`)]
+    .join('\n');
 }
 
 export function noteAdded(issue: IssueSummary, note: Note): string {
-  return `Note added to ${reference(issue)}: ${clean(note.content)}`;
+  return [...wrap(`✓ Note added to ${reference(issue)}`, terminalWidth()).map(line => color.green(line)),
+    ...wrap(clean(note.content, true), terminalWidth() - 2).map(line => `  ${line}`)].join('\n');
 }

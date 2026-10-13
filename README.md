@@ -97,6 +97,8 @@ Search matches titles and descriptions, ignoring case. All whitespace-separated 
 
 Missing arguments prompt only in an interactive terminal. `pno edit 1` lets you choose a field to edit. Supplied edit flags never prompt. Ambiguous projects offer an interactive selection. Deletion requires confirmation unless `--force` is supplied. Success exits with code 0; cancellation uses 130; errors use code 1 and stderr.
 
+Terminal lists use compact, aligned columns with short creation dates and separate open/done groups. Narrow terminals use stacked rows, and long titles wrap without being truncated. `pno show` separates the description, chronological notes timeline, and Git/date metadata; descriptions and notes retain paragraphs and indentation. Dates use local time, with exact dates and 24-hour times in details. Search and filtered lists show their query or active filters and result count. Commands that change issues print short confirmations; use `pno show <issue>` for full details.
+
 ## JSON and export
 
 Use `--json` (`-j`) for undecorated, machine-readable output: one JSON value on stdout. JSON commands never prompt; supply required arguments, `--force` for deletion, field flags for editing, and numeric project selectors when names are ambiguous.

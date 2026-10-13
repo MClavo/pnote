@@ -84,6 +84,32 @@ test('cross-project references work by name and ID without registering the calle
   assert.deepEqual(readdirSync(f.other), []);
 });
 
+test('human output uses compact lists, timeline detail, and concise action feedback', t => {
+  const f = fixture(t);
+  const created = f.run(['add', 'Fix recovery', '-p', 'high', '--description', 'First paragraph.\n\nSecond paragraph.']);
+  assert.equal(created.status, 0, created.stderr);
+  assert.match(created.stdout, /✓ Created .*:1 · Fix recovery \[high\]/);
+  assert.doesNotMatch(created.stdout, /Created\s+\d|priority|Description|\x1b/);
+  const note = f.run(['note', '1', 'First line.\nSecond line.']);
+  assert.match(note.stdout, /Note added/);
+  const listed = f.run([]);
+  assert.match(listed.stdout, /1 issue · 1 open · 0 done/);
+  assert.match(listed.stdout, /OPEN · 1/);
+  assert.match(listed.stdout, /#1\s+high\s+Fix recovery/);
+  const shown = f.run(['show', '1']);
+  assert.match(shown.stdout, /Description\n  First paragraph\.\n  \n  Second paragraph\./);
+  assert.match(shown.stdout, /Notes · 1\n  │\n  ●/);
+  assert.match(shown.stdout, /  │ First line\.\n  │ Second line\./);
+  assert.doesNotMatch(shown.stdout, /priority|\x1b/);
+  assert.equal(f.json<IssueSummary & { notes: Note[] }>(['show', '1']).notes[0]!.content, 'First line.\nSecond line.');
+  assert.match(f.run(['edit', '1', '-p', 'normal']).stdout, /Updated .* · high → normal/);
+  assert.match(f.run(['done', '1']).stdout, /✓ Completed .*:1 · Fix recovery/);
+  assert.match(f.run(['done', '1']).stdout, /is already done\./);
+  assert.match(f.run(['reopen', '1']).stdout, /✓ Reopened/);
+  assert.match(f.run(['reopen', '1']).stdout, /is already open\./);
+  assert.match(f.run(['rm', '1', '-f']).stdout, /✓ Deleted/);
+});
+
 test('invalid and incomplete commands fail on stderr without prompting or mutating issues', t => {
   const f = fixture(t);
   f.json(['add', 'Keep']);

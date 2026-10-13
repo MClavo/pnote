@@ -75,7 +75,9 @@ async function main(): Promise<void> {
       status: options.open ? 'open' : options.done ? 'done' : undefined, search,
     };
     const result = issues.listIssues(db(), filter);
-    output(options, result, () => render.issueList(result, Boolean(options.all), project));
+    output(options, result, () => render.issueList(result, Boolean(options.all), project, {
+      search, status: filter.status, priority: filter.priority,
+    }));
   }
 
   listOptions(command('ls', 'List issues', true)).action((options: Options) => list(options));
@@ -90,7 +92,7 @@ async function main(): Promise<void> {
         title, description: options.description,
         priority: options.priority ? issues.priority(options.priority) : undefined,
       }, gitHead(cwd));
-      output(options, issue, () => render.issueDetail(issue));
+      output(options, issue, () => render.issueAction('Created', issue, `${issue.title} [${issue.priority}]`));
     });
 
   command('show [reference]', 'Show issue details and notes')
@@ -116,7 +118,7 @@ async function main(): Promise<void> {
       const issue = await issueFrom(reference, options);
       if (!hasFields) patch = await prompts.edit(issue);
       const result = issues.editIssue(db(), issue, patch);
-      output(options, result, () => render.issueDetail(result));
+      output(options, result, () => render.issueEdited(issue, result));
     });
 
   command('note [reference] [text]', 'Append a timestamped note')
@@ -137,14 +139,16 @@ async function main(): Promise<void> {
     .action(async (reference: string | undefined, options: Options) => {
       const issue = await issueFrom(reference, options);
       const result = issues.completeIssue(db(), issue, gitHead(cwd));
-      output(options, result, () => render.issueDetail(result));
+      output(options, result, () => issue.status === result.status
+        ? render.unchanged(result) : render.issueAction('Completed', result));
     });
 
   command('reopen [reference]', 'Reopen a completed issue')
     .action(async (reference: string | undefined, options: Options) => {
       const issue = await issueFrom(reference, options);
       const result = issues.reopenIssue(db(), issue);
-      output(options, result, () => render.issueDetail(result));
+      output(options, result, () => issue.status === result.status
+        ? render.unchanged(result) : render.issueAction('Reopened', result));
     });
 
   command('rm [reference]', 'Delete an issue and its notes')
@@ -157,7 +161,7 @@ async function main(): Promise<void> {
       if (!options.force && !await prompts.confirmDelete(render.reference(issue))) throw new prompts.CancelledError();
       issues.deleteIssue(db(), issue);
       output(options, { deleted: true, projectId: issue.projectId, number: issue.number },
-        () => `Deleted ${render.reference(issue)}.`);
+        () => render.issueAction('Deleted', issue));
     });
 
   const projectCommand = command('project', 'Show the current project');
