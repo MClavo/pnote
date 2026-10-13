@@ -1,0 +1,22 @@
+# Local documentation
+/docs/
+
+# Dependencies and generated output
+node_modules/
+/dist/
+/coverage/
+*.tsbuildinfo
+.pnpm-store/
+
+# Local configuration, credentials, and tool state
+.env
+.env.*
+!.env.example
+/.aws/
+/.agents/
+/.codex/
+
+# Logs and operating system files
+*.log
+.DS_Store
+Thumbs.db
