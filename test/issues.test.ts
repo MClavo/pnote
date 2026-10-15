@@ -88,3 +88,17 @@ test('exports retain relationships and support current-project and all-project d
   assert.equal(issues.exportData(db).projects.length, 2);
   assert.equal(issues.exportData(db, b.id).notes.length, 0);
 });
+
+
+test('titles reject newlines on create and edit while descriptions and notes retain them', t => {
+  const db = memoryDb(t);
+  const project = createProject(db, 'a', null, '/a');
+  const issue = issues.createIssue(db, project.id, { title: 'One', description: 'first\nsecond' }, null);
+  for (const title of ['first\nsecond', 'first\rsecond', 'first\r\nsecond', 'first\u2028second']) {
+    assert.throws(() => issues.createIssue(db, project.id, { title }, null), /single line/);
+    assert.throws(() => issues.editIssue(db, issue, { title }), /single line/);
+  }
+  assert.equal(issues.getIssue(db, project.id, issue.number).title, 'One');
+  assert.equal(issue.description, 'first\nsecond');
+  assert.equal(issues.addNote(db, issue, 'first\nsecond').content, 'first\nsecond');
+});

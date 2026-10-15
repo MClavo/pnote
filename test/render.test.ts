@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IssueSummary, Note, Project } from '../src/core/model.js';
 import { clean, displayWidth, wrap } from '../src/ui/layout.js';
-import { issueDetail, issueList } from '../src/ui/render.js';
+import { issueDetail, issueList, projectDetail } from '../src/ui/render.js';
 
 const project: Project = { id: 1, name: 'pnote', remote: null, createdAt: '2026-10-13T07:14:00Z' };
 const issue: IssueSummary = {
@@ -26,7 +26,8 @@ test('compact lists align titles and creation dates across status groups', () =>
   assert.equal(rows[0]!.indexOf(issue.title), rows[1]!.indexOf('Document linking'));
   assert.equal(rows[0]!.indexOf(issue.title), rows[2]!.indexOf('Handle empty repositories'));
   assert.match(output, /CREATED/);
-  assert.doesNotMatch(output, /priority|\x1b/i);
+  assert.match(output, /ISSUE\s+PRIORITY\s+TITLE\s+CREATED/);
+  assert.doesNotMatch(output, /\x1b/);
 });
 
 test('detail preserves paragraphs and indentation with chronological timeline notes', () => {
@@ -77,4 +78,19 @@ test('terminal commands are stripped while safe multiline content remains', () =
   const output = issueDetail({ ...issue, title: unsafe, description: unsafe }, [{ ...notes[0]!, content: unsafe }]);
   assert.doesNotMatch(output, /\x1b|\x00|\x07|change-title|\[31m/);
   assert.match(output, /Red\n    Indented/);
+});
+
+
+test('project detail always shows paths and remote without a separate Git field', () => {
+  const paths = [{ projectId: project.id, path: '/work/pnote' }];
+  const plain = projectDetail(project, paths);
+  assert.match(plain, /pnote · project 1/);
+  assert.match(plain, /Paths\s+\/work\/pnote/);
+  assert.match(plain, /Remote\s+No remote configured/);
+  assert.doesNotMatch(plain, /^Git\s/m);
+  const remote = 'https://example.invalid/pnote.git';
+  const attached = projectDetail({ ...project, remote }, paths);
+  assert.match(attached, /Remote\s+https:\/\/example.invalid\/pnote.git/);
+  assert.doesNotMatch(attached, /^Git\s/m);
+  assert.match(projectDetail(project, []), /Paths\s+No associated paths/);
 });

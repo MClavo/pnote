@@ -8,6 +8,11 @@ export function requiredText(value: string, label: string): string {
   return trimmed;
 }
 
+export function titleText(value: string): string {
+  if (/[\r\n\u2028\u2029]/u.test(value)) throw new Error('Title must be a single line.');
+  return requiredText(value, 'Title');
+}
+
 export function priority(value: string): Priority {
   if (value !== 'low' && value !== 'normal' && value !== 'high') {
     throw new Error('Priority must be low, normal, or high.');
@@ -28,7 +33,7 @@ export function listIssues(db: Db, filter: IssueFilter = {}) {
 }
 
 export function createIssue(db: Db, projectId: number, input: IssueInput, commit: string | null) {
-  const title = requiredText(input.title, 'Title');
+  const title = titleText(input.title);
   if (input.priority) priority(input.priority);
   return queries.insertIssue(db, projectId, { ...input, title, description: input.description || null },
     commit, new Date().toISOString());
@@ -37,7 +42,7 @@ export function createIssue(db: Db, projectId: number, input: IssueInput, commit
 export function editIssue(db: Db, issue: Issue, patch: Partial<IssueInput>) {
   if (!Object.values(patch).some(value => value !== undefined)) throw new Error('Provide at least one field to edit.');
   const validated = { ...patch };
-  if (patch.title !== undefined) validated.title = requiredText(patch.title, 'Title');
+  if (patch.title !== undefined) validated.title = titleText(patch.title);
   if (patch.priority !== undefined) validated.priority = priority(patch.priority);
   if (patch.description !== undefined) validated.description = patch.description || null;
   return queries.updateIssue(db, issue, validated, new Date().toISOString());

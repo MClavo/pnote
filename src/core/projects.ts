@@ -30,22 +30,24 @@ function knownProject(db: Db, path: string): Project | undefined {
 export function resolveCurrentProject(db: Db, cwd: string): Project {
   const directory = normalizePath(cwd);
   const known = knownProject(db, directory);
-  if (known) return known;
-  const repositoryDirectory = gitRoot(cwd) ?? realpathSync(resolve(cwd));
+  const repository = gitRoot(cwd);
+  const repositoryDirectory = repository ?? realpathSync(resolve(cwd));
   const root = normalizePath(repositoryDirectory);
   const remote = gitRemote(repositoryDirectory);
+  const refresh = (project: Project) => repository ? queries.updateRemote(db, project, remote) : project;
+  if (known) return refresh(known);
   const name = basename(repositoryDirectory) || parse(repositoryDirectory).root;
   // Recheck under a write lock so simultaneous first invocations cannot create duplicates.
   return db.transaction(() => {
     const existing = knownProject(db, directory) ?? knownProject(db, root);
-    if (existing) return existing;
+    if (existing) return refresh(existing);
     const byRemote = remote ? queries.matchingProjects(db, 'remote', remote) : [];
     const matches = byRemote.length ? byRemote : queries.matchingProjects(db, 'name', name);
     if (matches.length > 1) throw new AmbiguousProjectError(matches, root);
     const match = matches[0];
     if (match) {
       queries.associatePath(db, root, match.id);
-      return match;
+      return refresh(match);
     }
     return queries.createProject(db, name, remote, root);
   }).immediate();

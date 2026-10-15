@@ -1,6 +1,8 @@
 import * as clack from '@clack/prompts';
 import type { Issue, IssueInput, Project } from '../core/model.js';
 import { clean } from './layout.js';
+import { editText } from './editor.js';
+import { color, priorityColor } from './theme.js';
 
 export class CancelledError extends Error {
   constructor() { super('Cancelled.'); }
@@ -16,15 +18,20 @@ export function canPrompt(json: boolean): boolean {
 }
 
 export async function text(message: string, initialValue?: string, required = true): Promise<string> {
-  return answer(await clack.text({
-    message, initialValue,
-    validate: required ? value => value?.trim() ? undefined : 'Enter a value.' : undefined,
-  }));
+  const value = await editText({ message, initialValue, required, multiline: false });
+  if (value === undefined) throw new CancelledError();
+  return value;
+}
+
+export async function multiline(message: string, initialValue?: string, required = true): Promise<string> {
+  const value = await editText({ message, initialValue, required });
+  if (value === undefined) throw new CancelledError();
+  return value;
 }
 
 export async function selectProject(projects: Project[]): Promise<Project> {
   const id = answer(await clack.select({
-    message: 'Select a project',
+    message: color.bold(color.cyan('Select a project')),
     options: projects.map(project => ({ value: project.id, label: `${project.name} (${project.id})` })),
   }));
   return projects.find(project => project.id === id)!;
@@ -32,25 +39,25 @@ export async function selectProject(projects: Project[]): Promise<Project> {
 
 export async function edit(issue: Issue): Promise<Partial<IssueInput>> {
   const field = answer(await clack.select({
-    message: `What would you like to edit? (#${issue.number} · ${clean(issue.title)})`,
+    message: color.bold(color.cyan(`What would you like to edit? (#${issue.number} · ${clean(issue.title)})`)),
     options: [
-      { value: 'title', label: 'Title' },
-      { value: 'description', label: 'Description' },
+      { value: 'title', label: color.cyan('Title') },
+      { value: 'description', label: color.cyan('Description') },
       { value: 'priority', label: 'low / normal / high' },
     ],
   }));
   if (field === 'title') return { title: await text('Title', issue.title) };
-  if (field === 'description') return { description: await text('Description (empty clears it)', issue.description ?? '', false) };
+  if (field === 'description') return { description: await multiline('Description (empty clears it)', issue.description ?? '', false) };
   return { priority: answer(await clack.select({
-    message: 'Select low, normal, or high', initialValue: issue.priority,
+    message: color.bold(color.cyan('Select low, normal, or high')), initialValue: issue.priority,
     options: [
-      { value: 'low' as const, label: 'low' },
-      { value: 'normal' as const, label: 'normal' },
-      { value: 'high' as const, label: 'high' },
+      { value: 'low' as const, label: priorityColor('low') },
+      { value: 'normal' as const, label: priorityColor('normal') },
+      { value: 'high' as const, label: priorityColor('high') },
     ],
   })) };
 }
 
 export async function confirmDelete(reference: string): Promise<boolean> {
-  return answer(await clack.confirm({ message: `Delete issue ${reference} and its notes?`, initialValue: false }));
+  return answer(await clack.confirm({ message: color.bold(color.yellow(`Delete issue ${clean(reference)} and its notes?`)), initialValue: false }));
 }

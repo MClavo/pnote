@@ -1,8 +1,7 @@
-import pc from 'picocolors';
 import type { IssueSummary, Note, Priority, Project, ProjectPath, Status } from '../core/model.js';
 import { clean, displayWidth, pad, terminalWidth, wrap } from './layout.js';
 
-const color = pc.createColors(pc.isColorSupported && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env));
+import { color, priorityColor as level } from './theme.js';
 
 function timestamp(value: string): string {
   const date = new Date(value);
@@ -15,10 +14,6 @@ function shortDate(value: string): string {
     day: '2-digit', month: 'short',
     ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
   });
-}
-
-function level(value: Priority): string {
-  return value === 'high' ? color.red(value) : value === 'normal' ? color.yellow(value) : color.dim(value);
 }
 
 function count(value: number, noun: string): string {
@@ -61,7 +56,7 @@ export function issueList(issues: IssueSummary[], all: boolean, project?: Projec
   const referenceWidth = Math.max(5, ...issues.map(issue => displayWidth(label(issue))));
   const dateWidth = Math.max(7, ...issues.map(issue => displayWidth(shortDate(issue.createdAt))));
   const titleWidth = Math.min(Math.max(20, ...issues.map(issue => displayWidth(clean(issue.title)))),
-    width - (2 + referenceWidth + 2 + 6 + 2 + 2 + dateWidth));
+    width - (2 + referenceWidth + 2 + 8 + 2 + 2 + dateWidth));
   const stacked = titleWidth < 20;
   let hasHeader = false;
 
@@ -70,7 +65,7 @@ export function issueList(issues: IssueSummary[], all: boolean, project?: Projec
     if (!group.length) continue;
     lines.push('', status === 'done' ? color.green(`DONE · ${group.length}`) : color.bold(`OPEN · ${group.length}`));
     if (!stacked && !hasHeader) {
-      lines.push(color.dim(`  ${pad('ISSUE', referenceWidth)}  ${' '.repeat(6)}  ${pad('TITLE', titleWidth)}  CREATED`));
+      lines.push(color.dim(`  ${pad('ISSUE', referenceWidth)}  ${pad('PRIORITY', 8)}  ${pad('TITLE', titleWidth)}  CREATED`));
       hasHeader = true;
     }
     for (const issue of group) {
@@ -81,8 +76,8 @@ export function issueList(issues: IssueSummary[], all: boolean, project?: Projec
           ...wrap(clean(issue.title), width - 2).map(line => `  ${line}`));
       } else {
         const title = wrap(clean(issue.title), titleWidth);
-        lines.push(`  ${pad(color.cyan(label(issue)), referenceWidth)}  ${pad(level(issue.priority), 6)}  ${pad(title[0]!, titleWidth)}  ${color.dim(shortDate(issue.createdAt))}`,
-          ...title.slice(1).map(line => `${' '.repeat(2 + referenceWidth + 2 + 6 + 2)}${line}`));
+        lines.push(`  ${pad(color.cyan(label(issue)), referenceWidth)}  ${pad(level(issue.priority), 8)}  ${pad(title[0]!, titleWidth)}  ${color.dim(shortDate(issue.createdAt))}`,
+          ...title.slice(1).map(line => `${' '.repeat(2 + referenceWidth + 2 + 8 + 2)}${line}`));
       }
     }
   }
@@ -95,9 +90,9 @@ export function issueDetail(issue: IssueSummary, notes: Note[] = [], width = ter
     ? [`${color.cyan(reference(issue))} ${color.dim(`/ ${issue.status} /`)} ${level(issue.priority)}`]
     : [...wrap(reference(issue), width).map(line => color.cyan(line)), `${issue.status} / ${level(issue.priority)}`];
   lines.push(...wrap(clean(issue.title), width).map(line => color.bold(line)));
-  if (issue.description) lines.push('', color.bold('Description'),
+  if (issue.description) lines.push('', color.bold(color.cyan('Description')),
     ...wrap(clean(issue.description, true), width - 2).map(line => `  ${line}`));
-  lines.push('', color.bold(`Notes · ${notes.length}`));
+  lines.push('', color.bold(color.cyan(`Notes · ${notes.length}`)));
   if (!notes.length) lines.push(color.dim('  No notes yet.'));
   else {
     lines.push(color.dim('  │'));
@@ -127,7 +122,9 @@ export function issueAction(action: string, issue: IssueSummary, detail?: string
   return wrap(`✓ ${action} ${ref} · ${clean(detail ?? issue.title)}`, terminalWidth())
     .map((line, index) => {
       const styled = line.replace(ref, () => color.cyan(ref));
-      return index === 0 ? color.green(styled.slice(0, 1)) + styled.slice(1) : styled;
+      return index === 0
+        ? color.green(styled.slice(0, 1)) + styled.slice(1).replace(action, () => color.bold(color.green(action)))
+        : styled;
     }).join('\n');
 }
 
@@ -144,11 +141,28 @@ export function unchanged(issue: IssueSummary): string {
   return wrap(`${reference(issue)} is already ${issue.status}.`, terminalWidth()).map(line => color.dim(line)).join('\n');
 }
 
-export function projectDetail(project: Project, paths: ProjectPath[]): string {
-  return [color.bold(color.cyan(`${clean(project.name)} · project ${project.id}`)), '',
-    ...(project.remote ? [`Remote  ${clean(project.remote)}`] : []),
-    ...paths.map((path, index) => `${index === 0 ? 'Paths   ' : '        '}${clean(path.path)}`)]
-    .join('\n');
+export function projectDetail(project: Project, paths: ProjectPath[], width = terminalWidth()): string {
+  const name = clean(project.name);
+  const metadata = `· project ${project.id}`;
+  const lines = displayWidth(`${name} ${metadata}`) <= width
+    ? [`${color.bold(color.cyan(name))} ${color.dim(metadata)}`]
+    : [...wrap(name, width).map(line => color.bold(color.cyan(line))),
+      ...wrap(metadata, width).map(line => color.dim(line))];
+  lines.push('');
+  const field = (label: string, value: string, muted = false) => {
+    const content = wrap(value, width - 8);
+    lines.push(...content.map((line, index) => {
+      const prefix = index === 0 ? pad(color.cyan(label), 8) : ' '.repeat(8);
+      return prefix + (muted ? color.dim(line) : line);
+    }));
+  };
+  if (paths.length) {
+    paths.forEach((path, index) => field(index === 0 ? 'Paths' : '', clean(path.path)));
+  } else {
+    field('Paths', 'No associated paths', true);
+  }
+  field('Remote', project.remote ? clean(project.remote) : 'No remote configured', !project.remote);
+  return lines.join('\n');
 }
 
 export function projectList(projects: Project[]): string {
@@ -161,6 +175,8 @@ export function projectList(projects: Project[]): string {
 }
 
 export function noteAdded(issue: IssueSummary, note: Note): string {
-  return [...wrap(`✓ Note added to ${reference(issue)}`, terminalWidth()).map(line => color.green(line)),
+  return [...wrap(`✓ Note added to ${reference(issue)}`, terminalWidth()).map(line =>
+    line.replace('✓', () => color.green('✓')).replace('Note added to', () => color.bold(color.green('Note added to')))
+      .replace(reference(issue), () => color.cyan(reference(issue)))),
     ...wrap(clean(note.content, true), terminalWidth() - 2).map(line => `  ${line}`)].join('\n');
 }

@@ -42,7 +42,7 @@ Quote text containing spaces. `<issue>` means a project-scoped number or a `proj
 | `pno done <issue>` | Complete an issue |
 | `pno reopen <issue>` | Reopen an issue and clear completion metadata |
 | `pno rm <issue>` | Delete an issue and its notes, with confirmation |
-| `pno project` | Show the current project's name, ID, remote, and paths |
+| `pno project` | Show the current project's name, ID, paths and origin remote |
 | `pno projects` | List registered projects and their IDs |
 | `pno project link <name\|id>` | Associate this directory with an existing project |
 | `pno export --json` | Export this project's data |
@@ -95,9 +95,9 @@ Use `pno project link mangrove` or `pno project link 3` to associate another dir
 
 Search matches titles and descriptions, ignoring case. All whitespace-separated terms must match, even across different fields. `%`, `_`, and `\` are literal characters. Notes are excluded.
 
-Missing arguments prompt only in an interactive terminal. `pno edit 1` lets you choose a field to edit. Supplied edit flags never prompt. Ambiguous projects offer an interactive selection. Deletion requires confirmation unless `--force` is supplied. Success exits with code 0; cancellation uses 130; errors use code 1 and stderr.
+Missing arguments prompt only in an interactive terminal. `pno edit 1` lets you choose a field to edit. Description and note prompts use a multiline editor: Enter saves, and Ctrl+J inserts a newline (Shift+Enter also works when the terminal sends a distinct key sequence). Titles stay on one line; newlines in title arguments are rejected. Arrow keys move through text and wrapped lines; Home/End move to line boundaries, Ctrl+Home/End to document boundaries, and Ctrl+Left/Right by words. Hold Shift with movement keys to select text; typing, Backspace, or Delete replaces the selection. Ctrl+A selects all. Bracketed multiline pastes insert text without saving. Ctrl+C or Escape cancels and leaves the draft visible in dim, crossed-out text. Saved prompts show a green check; active controls and headings use cyan, and validation messages use yellow. Decorative styling respects `NO_COLOR`. Blank lines and existing multiline descriptions are preserved. Supplied edit flags never prompt. Ambiguous projects offer an interactive selection. Deletion requires confirmation unless `--force` is supplied. Success exits with code 0; cancellation uses 130; errors use code 1 and stderr.
 
-Terminal lists use compact, aligned columns with short creation dates and separate open/done groups. Narrow terminals use stacked rows, and long titles wrap without being truncated. `pno show` separates the description, chronological notes timeline, and Git/date metadata; descriptions and notes retain paragraphs and indentation. Dates use local time, with exact dates and 24-hour times in details. Search and filtered lists show their query or active filters and result count. Commands that change issues print short confirmations; use `pno show <issue>` for full details.
+Terminal lists use compact, aligned issue, priority, title, and creation date columns and separate open/done groups. Narrow terminals use stacked rows, and long titles wrap without being truncated. `pno show` separates the description, chronological notes timeline, and Git/date metadata; descriptions and notes retain paragraphs and indentation. Dates use local time, with exact dates and 24-hour times in details. Search and filtered lists show their query or active filters and result count. Commands that change issues print short confirmations; use `pno show <issue>` for full details.
 
 ## JSON and export
 
@@ -132,19 +132,35 @@ Export requires `--json`; importing data is not supported.
 - Linux: `$XDG_DATA_HOME/pnote/pnote.db`, or `~/.local/share/pnote/pnote.db` when unset or relative.
 - macOS: the same XDG/home fallback as Linux.
 
-The closest known directory association wins, then the exact Git `origin` remote, then an unambiguous repository/directory name. Git repositories use their root directory; other projects use the current directory. Otherwise a project is created. Changing a remote or initializing Git later preserves known associations. `project link` explicitly associates the current directory; subdirectories inherit the nearest association.
+The closest known directory association wins, then the exact Git `origin` remote, then an unambiguous repository/directory name. Git repositories use their root directory; other projects use the current directory. Otherwise a project is created. Changing a remote or initializing Git later preserves known associations and refreshes the stored origin remote on the next command that resolves the current project. Removing origin clears the stored remote; unavailable Git leaves it unchanged. `project link` explicitly associates the current directory; subdirectories inherit the nearest association.
 
 Creation and completion record the calling directory's full Git HEAD if available, including when completing an explicit cross-project reference. These are snapshots of the calling repository, not proof that a commit implemented the issue. Reopening clears completion metadata; repeating completion or reopening leaves existing metadata intact.
+
+`pno project` and `pno project link` always show the project, associated paths, and origin remote. When no remote is configured, the Remote field displays “No remote configured”, including for directories without Git.
 
 PNote never modifies Git configuration or writes metadata inside projects. `NO_COLOR` is respected, and redirected output has no colors.
 
 ## Development
 
+To run your local checkout globally during development, run these once from this folder:
+
 ```sh
-pnpm dev --help    # Run from TypeScript
+pnpm install
+pnpm build
+npm link
+```
+
+Then keep `pnpm dev` running in a terminal. It compiles TypeScript to `dist/` initially and whenever source files change. After compilation succeeds, run `pno` from any directory in another terminal; the npm link points to this checkout, so each invocation uses the latest compiled code without reinstalling. Stop the watcher with Ctrl+C.
+
+Ensure npm's global executable directory is on `PATH` (`npm prefix -g` on Windows, or its `bin` subdirectory on Linux/macOS). If you previously installed PNote with pnpm globally, that shim may take precedence; use `command -v pno` (PowerShell: `Get-Command pno`) to check which command runs and put npm's executable directory first on `PATH` for development.
+
+To stop using the development link, run `npm unlink --global pnote`, then use the unchanged [installation steps](#install) above for the production installation.
+
+```sh
+pnpm dev          # Compile to dist/ and watch for changes
 pnpm typecheck    # Check source and tests
 pnpm test         # Build and run automated tests
 pnpm build        # Compile to dist/
 ```
 
-`src/cli` handles commands; `src/core` handles behavior; `src/db` owns SQL and migrations; `src/ui` owns prompts and rendering. Tests use temporary databases and directories. Git tests create isolated fixture repositories and skip if Git is unavailable. See [the specification](docs/specification.md) for the full design.
+`src/cli` handles commands; `src/core` handles behavior; `src/db` owns SQL and migrations; `src/ui` owns prompts and rendering. Tests use temporary databases and directories. Git tests create isolated fixture repositories and skip if Git is unavailable.

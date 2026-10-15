@@ -11,6 +11,12 @@ export function getProject(db: Db, id: number): Project | undefined {
   return db.prepare(`SELECT ${columns} FROM projects WHERE id = ?`).get(id) as Project | undefined;
 }
 
+export function updateRemote(db: Db, project: Project, remote: string | null): Project {
+  if (project.remote === remote) return project;
+  db.prepare('UPDATE projects SET remote = ? WHERE id = ?').run(remote, project.id);
+  return { ...project, remote };
+}
+
 export function matchingProjects(db: Db, field: 'name' | 'remote', value: string): Project[] {
   return db.prepare(`SELECT ${columns} FROM projects WHERE ${field} = ? ORDER BY id`).all(value) as Project[];
 }

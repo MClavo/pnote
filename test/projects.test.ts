@@ -23,9 +23,15 @@ test('Git initialized later, changed remotes, and nested directories preserve as
   const project = resolveCurrentProject(db, cwd);
   git(cwd, 'init');
   git(cwd, 'remote', 'add', 'origin', 'https://example.invalid/first.git');
-  assert.equal(resolveCurrentProject(db, cwd).id, project.id);
+  assert.deepEqual(resolveCurrentProject(db, cwd), { ...project, remote: 'https://example.invalid/first.git' });
   git(cwd, 'remote', 'set-url', 'origin', 'https://example.invalid/changed.git');
-  assert.equal(resolveCurrentProject(db, directory(cwd, 'nested')).id, project.id);
+  assert.deepEqual(resolveCurrentProject(db, directory(cwd, 'nested')), {
+    ...project, remote: 'https://example.invalid/changed.git',
+  });
+  assert.equal(resolveProject(db, String(project.id)).remote, 'https://example.invalid/changed.git');
+  git(cwd, 'remote', 'remove', 'origin');
+  assert.deepEqual(resolveCurrentProject(db, cwd), project);
+  assert.equal(listProjects(db).length, 1);
 });
 
 test('a preexisting directory association wins when an ancestor later becomes a repository', { skip: !hasGit }, t => {
@@ -111,4 +117,20 @@ test('path normalization resolves relative segments', t => {
   const cwd = temporaryDirectory(t);
   directory(cwd, 'child');
   assert.equal(normalizePath(join(cwd, 'child', '..')), normalizePath(cwd));
+});
+
+
+test('temporarily unavailable Git retains the last known remote and project association', { skip: !hasGit }, t => {
+  const db = memoryDb(t);
+  const cwd = temporaryDirectory(t);
+  git(cwd, 'init');
+  git(cwd, 'remote', 'add', 'origin', 'https://example.invalid/retained.git');
+  const project = resolveCurrentProject(db, cwd);
+  const previousPath = process.env.PATH;
+  try {
+    process.env.PATH = '';
+    assert.deepEqual(resolveCurrentProject(db, cwd), project);
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });

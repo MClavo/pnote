@@ -8,6 +8,8 @@ import { AmbiguousProjectError, linkProject, parseIssueReference, resolveCurrent
 import type { IssueFilter, IssueInput, Project } from '../core/model.js';
 import * as prompts from '../ui/prompts.js';
 import * as render from '../ui/render.js';
+import { errorColor } from '../ui/theme.js';
+import { clean } from '../ui/layout.js';
 
 interface Options {
   json?: boolean;
@@ -35,10 +37,10 @@ async function main(): Promise<void> {
     console.log(options.json ? JSON.stringify(data) : human());
   }
 
-  async function input(value: string | undefined, label: string, options: Options): Promise<string> {
+  async function input(value: string | undefined, label: string, options: Options, multiline = false): Promise<string> {
     if (value !== undefined) return issues.requiredText(value, label);
     if (!prompts.canPrompt(Boolean(options.json))) throw new Error(`${label} is required. See --help.`);
-    return prompts.text(label);
+    return multiline ? prompts.multiline(label) : prompts.text(label);
   }
 
   async function choose(resolve: () => Project, options: Options): Promise<Project> {
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
       if (!hasFields && !prompts.canPrompt(Boolean(options.json))) {
         throw new Error('Provide --title, --description, or --priority to edit without prompts.');
       }
-      if (patch.title !== undefined) issues.requiredText(patch.title, 'Title');
+      if (patch.title !== undefined) issues.titleText(patch.title);
       const issue = await issueFrom(reference, options);
       if (!hasFields) patch = await prompts.edit(issue);
       const result = issues.editIssue(db(), issue, patch);
@@ -123,7 +125,7 @@ async function main(): Promise<void> {
 
   command('note [reference] [text]', 'Append a timestamped note')
     .action(async (reference: string | undefined, value: string | undefined, options: Options) => {
-      const content = await input(value, 'Note text', options);
+      const content = await input(value, 'Note text', options, true);
       const issue = await issueFrom(reference, options);
       const note = issues.addNote(db(), issue, content);
       output(options, note, () => render.noteAdded(issue, note));
@@ -205,7 +207,9 @@ main().catch((error: unknown) => {
   if (error instanceof CommanderError) {
     process.exitCode = error.exitCode;
   } else {
-    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = error instanceof prompts.CancelledError ? 130 : 1;
+    const cancelled = error instanceof prompts.CancelledError;
+    console.error(cancelled ? errorColor.dim('Cancelled.')
+      : `${errorColor.bold(errorColor.red('Error:'))} ${clean(error instanceof Error ? error.message : String(error))}`);
+    process.exitCode = cancelled ? 130 : 1;
   }
 });

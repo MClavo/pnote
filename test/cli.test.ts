@@ -181,3 +181,47 @@ test('simultaneous first invocations create one project with distinct sequential
   assert.equal(f.json<Project[]>(['projects']).length, 1);
   assert.deepEqual(readdirSync(f.cwd), []);
 });
+
+
+test('late Git initialization refreshes project metadata without replacing issues or their snapshots', { skip: !hasGit }, t => {
+  const f = fixture(t);
+  const original = f.json<IssueSummary>(['add', 'Before Git']);
+  git(f.cwd, 'init');
+  git(f.cwd, 'remote', 'add', 'origin', 'https://example.invalid/later.git');
+  const hash = commit(f.cwd);
+  const project = f.json<Project>(['project']);
+  assert.equal(project.id, original.projectId);
+  assert.equal(project.remote, 'https://example.invalid/later.git');
+  assert.equal(f.json<IssueSummary>(['show', '1']).createdCommit, null);
+  assert.equal(f.json<IssueSummary>(['add', 'After Git']).createdCommit, hash);
+  git(f.cwd, 'remote', 'set-url', 'origin', 'https://example.invalid/changed.git');
+  f.json(['note', '1', 'Refresh from a child'], directory(f.cwd, 'child'));
+  assert.equal(f.json<Project[]>(['projects'])[0]!.remote, 'https://example.invalid/changed.git');
+  assert.equal(f.json<Project[]>(['projects']).length, 1);
+});
+
+
+test('project output always shows remote and updates it after late Git initialization', { skip: !hasGit }, t => {
+  const f = fixture(t);
+  type Details = Project & { paths: { path: string }[] };
+  const original = f.json<Details>(['project']);
+  assert.equal(original.remote, null);
+  assert.equal('git' in original, false);
+  assert.match(f.run(['project']).stdout, /Remote\s+No remote configured/);
+  git(f.cwd, 'init');
+  const local = f.json<Details>(['project']);
+  assert.equal(local.id, original.id);
+  assert.equal(local.remote, null);
+  assert.match(f.run(['project']).stdout, /Remote\s+No remote configured/);
+  assert.doesNotMatch(f.run(['project']).stdout, /^Git\s/m);
+  const child = directory(f.cwd, 'child');
+  git(f.cwd, 'remote', 'add', 'origin', 'https://example.invalid/pnote.git');
+  const attached = f.json<Details>(['project'], child);
+  assert.equal(attached.id, original.id);
+  assert.equal(attached.remote, 'https://example.invalid/pnote.git');
+  assert.match(f.run(['project']).stdout, /Remote\s+https:\/\/example.invalid\/pnote.git/);
+  git(f.cwd, 'remote', 'remove', 'origin');
+  assert.match(f.run(['project']).stdout, /Remote\s+No remote configured/);
+  assert.equal(f.json<Details>(['project']).remote, null);
+  assert.match(f.run(['project', 'link', String(original.id)]).stdout, /Remote\s+No remote configured/);
+});
