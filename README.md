@@ -164,3 +164,7 @@ pnpm build        # Compile to dist/
 ```
 
 `src/cli` handles commands; `src/core` handles behavior; `src/db` owns SQL and migrations; `src/ui` owns prompts and rendering. Tests use temporary databases and directories. Git tests create isolated fixture repositories and skip if Git is unavailable.
+
+## License
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).

@@ -2,9 +2,10 @@
   "name": "pnote",
   "version": "0.1.0",
   "description": "Local project issues and notes from your terminal",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "bin": { "pno": "dist/cli/main.js" },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "LICENSE"],
   "engines": { "node": "24.x || 26.x" },
   "packageManager": "pnpm@12.11.2",
   "scripts": {
