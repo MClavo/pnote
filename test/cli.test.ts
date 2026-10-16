@@ -225,3 +225,91 @@ test('project output always shows remote and updates it after late Git initializ
   assert.equal(f.json<Details>(['project']).remote, null);
   assert.match(f.run(['project', 'link', String(original.id)]).stdout, /Remote\s+No remote configured/);
 });
+
+test('agent flags preserve per-action metadata in JSON and exports without verbose terminal attribution', t => {
+  const f = fixture(t);
+  const created = f.json<IssueSummary>(['add', 'Agent issue', '-ag', ' openai:gpt-6.1 ', '-s', ' creation-session ']);
+  assert.equal(created.createdAgent, 'openai:gpt-6.1');
+  assert.equal(created.createdSession, 'creation-session');
+  assert.equal(created.completedAgent, null);
+  const note = f.json<Note>(['note', `${created.projectId}:1`, 'Agent note', '--agent', 'other:provider/model', '--session', 'note-session'], f.other);
+  assert.equal(note.agent, 'other:provider/model');
+  assert.equal(note.session, 'note-session');
+  const humanNote = f.json<Note>(['note', '1', 'Human note']);
+  assert.equal(humanNote.agent, null);
+  assert.equal(humanNote.session, null);
+  const feedback = f.run(['done', `${created.projectId}:1`, '-ag', 'codex', '-s', 'closure-session'], f.other);
+  assert.equal(feedback.status, 0, feedback.stderr);
+  assert.match(feedback.stdout, /Completed[^\n]+◆ AI/);
+  assert.doesNotMatch(feedback.stdout, /codex|closure-session|\x1b/);
+  const shown = f.json<IssueSummary & { notes: Note[] }>(['show', '1']);
+  assert.equal(shown.completedAgent, 'codex');
+  assert.equal(shown.completedSession, 'closure-session');
+  assert.deepEqual(shown.notes, [note, humanNote]);
+  assert.equal(f.json<IssueSummary>(['done', '1', '--agent', 'replacement']).completedAgent, 'codex');
+  for (const args of [[], ['ls'], ['search', 'Agent'], ['show', '1']]) {
+    const result = f.run(args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /◆ AI/);
+    assert.doesNotMatch(result.stdout, /openai:gpt-6\.1|other:provider\/model|codex|creation-session|note-session|closure-session|\x1b/);
+  }
+  const listed = f.json<IssueSummary[]>(['ls', '-a']);
+  assert.equal(listed[0]!.createdAgent, 'openai:gpt-6.1');
+  assert.equal('hasAgentActivity' in listed[0]!, false);
+  const exported = f.json<ExportData>(['export', '-a']);
+  assert.deepEqual(Object.keys(exported), ['projects', 'paths', 'issues', 'notes']);
+  assert.equal(exported.issues[0]!.createdSession, 'creation-session');
+  assert.equal(exported.issues[0]!.completedSession, 'closure-session');
+  assert.deepEqual(exported.notes, [note, humanNote]);
+  assert.equal(f.json<Project[]>(['projects']).length, 1);
+  assert.deepEqual(readdirSync(f.cwd), []);
+  assert.deepEqual(readdirSync(f.other), []);
+});
+
+test('badges follow current action authorship and disappear when the sole AI closure is cleared', t => {
+  const f = fixture(t);
+  assert.match(f.run(['add', 'Agent creation', '--agent', 'codex']).stdout, /Created[^\n]+◆ AI/);
+  assert.doesNotMatch(f.run(['note', '1', 'Human note']).stdout, /◆ AI/);
+  assert.doesNotMatch(f.run(['done', '1']).stdout, /◆ AI/);
+  assert.doesNotMatch(f.run(['edit', '1', '--priority', 'high']).stdout, /◆ AI/);
+  assert.doesNotMatch(f.run(['reopen', '1']).stdout, /◆ AI/);
+  assert.match(f.run(['note', '1', 'Agent note', '-ag', 'other']).stdout, /◆ AI/);
+  f.json(['add', 'Closure only']);
+  f.json(['done', '2', '--agent', 'codex', '--session', 'run']);
+  assert.match(f.run(['search', 'Closure']).stdout, /◆ AI/);
+  const reopened = f.json<IssueSummary>(['reopen', '2']);
+  assert.equal(reopened.completedAgent, null);
+  assert.equal(reopened.completedSession, null);
+  assert.doesNotMatch(f.run(['search', 'Closure']).stdout, /◆ AI/);
+  f.json(['done', '2']);
+  assert.doesNotMatch(f.run(['show', '2']).stdout, /◆ AI/);
+  assert.doesNotMatch(f.run(['search', 'Closure']).stdout, /◆ AI/);
+});
+
+test('invalid attribution flags fail before database creation or project registration', t => {
+  const f = fixture(t);
+  for (const command of [['add', 'Title'], ['note', '1', 'Note'], ['done', '1']]) {
+    for (const flags of [
+      ['--session', 'orphan'], ['--agent', ' '], ['-ag', 'codex', '-s', ' '],
+      ['-a', 'codex'], ['-ag'], ['--agent'], ['--session'],
+    ]) {
+      const result = f.run([...command, '--json', ...flags]);
+      assert.notEqual(result.status, 0, JSON.stringify([...command, ...flags]));
+      assert.equal(result.stdout, '');
+      assert.ok(result.stderr);
+      assert.doesNotMatch(result.stderr, /\x1b/);
+    }
+  }
+  for (const command of [['edit', '1'], ['show', '1'], ['reopen', '1'], ['rm', '1']]) {
+    const result = f.run([...command, '--agent', 'codex', '--json']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /unknown option/);
+  }
+  for (const command of ['add', 'note', 'done']) {
+    const result = f.run([command, '--help']);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /-ag, --agent <identifier>/);
+    assert.match(result.stdout, /-s, --session <id>/);
+  }
+  assert.deepEqual(readdirSync(f.root).sort(), ['other', 'project with spaces']);
+});

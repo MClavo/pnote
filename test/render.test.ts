@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import pc from 'picocolors';
 import type { IssueSummary, Note, Project } from '../src/core/model.js';
 import { clean, displayWidth, wrap } from '../src/ui/layout.js';
-import { issueDetail, issueList, projectDetail } from '../src/ui/render.js';
+import { issueAction, issueDetail, issueList, noteAdded, projectDetail } from '../src/ui/render.js';
+import { aiBadge, terminalColors } from '../src/ui/theme.js';
 
 const project: Project = { id: 1, name: 'pnote', remote: null, createdAt: '2026-10-13T07:14:00Z' };
 const issue: IssueSummary = {
@@ -10,11 +12,11 @@ const issue: IssueSummary = {
   title: 'Fix recovery after restart', priority: 'high', status: 'open',
   description: 'First paragraph.\n\nSteps:\n  1. Write a record.\n  2. Restart.',
   createdAt: '2026-10-13T07:14:00Z', updatedAt: '2026-10-13T08:06:00Z',
-  completedAt: null, createdCommit: 'a1b2c3d40000000000000000000000000000000000', completedCommit: null,
+  completedAt: null, createdCommit: 'a1b2c3d40000000000000000000000000000000000', completedCommit: null, createdAgent: null, createdSession: null, completedAgent: null, completedSession: null,
 };
 const notes: Note[] = [
-  { id: 1, issueId: 42, createdAt: '2026-10-13T07:24:00Z', content: 'Reproduced on Windows.' },
-  { id: 2, issueId: 42, createdAt: '2026-10-13T08:06:00Z', content: 'Fails after the first write.\nNext: inspect recovery.' },
+  { id: 1, issueId: 42, createdAt: '2026-10-13T07:24:00Z', agent: null, session: null, content: 'Reproduced on Windows.' },
+  { id: 2, issueId: 42, createdAt: '2026-10-13T08:06:00Z', agent: null, session: null, content: 'Fails after the first write.\nNext: inspect recovery.' },
 ];
 
 test('compact lists align titles and creation dates across status groups', () => {
@@ -28,6 +30,54 @@ test('compact lists align titles and creation dates across status groups', () =>
   assert.match(output, /CREATED/);
   assert.match(output, /ISSUE\s+PRIORITY\s+TITLE\s+CREATED/);
   assert.doesNotMatch(output, /\x1b/);
+});
+
+test('AI badges mark only the attributed actions and listing activity', () => {
+  const created = { ...issue, createdAgent: 'openai:gpt-6.1', createdSession: 'private-creation-session' };
+  const completed = { ...created, status: 'done' as const, completedAt: issue.updatedAt,
+    completedAgent: 'another-agent', completedSession: 'private-closure-session' };
+  const agentNote = { ...notes[0]!, agent: 'note-agent', session: 'private-note-session' };
+  const detail = issueDetail(completed, [agentNote, notes[1]!]);
+  assert.equal((detail.match(/◆ AI/g) ?? []).length, 3);
+  assert.match(detail, /Created[^\n]+◆ AI/);
+  assert.match(detail, /Completed[^\n]+◆ AI/);
+  assert.equal((issueDetail(created, notes).match(/◆ AI/g) ?? []).length, 1);
+  assert.equal((issueList([{ ...issue, hasAgentActivity: true }], false, project).match(/◆ AI/g) ?? []).length, 1);
+  assert.doesNotMatch(issueList([issue], false, project), /◆ AI/);
+  assert.doesNotMatch(issueAction('Updated', created), /◆ AI/);
+  assert.match(issueAction('Created', created, undefined, true), /◆ AI/);
+  assert.match(noteAdded(issue, agentNote), /◆ AI/);
+  assert.doesNotMatch(noteAdded(created, notes[1]!), /◆ AI/);
+  for (const output of [detail, issueList([completed], false, project), noteAdded(issue, agentNote)]) {
+    assert.doesNotMatch(output, /openai:gpt-6\.1|another-agent|note-agent|private-.*session/);
+  }
+});
+
+test('AI badges remain intact and fit wrapped and stacked layouts', () => {
+  for (const width of [20, 40, 80, 120]) {
+    const attributed = { ...issue, title: '数据恢复 👩🏽‍💻 ' + 'z'.repeat(140), hasAgentActivity: true,
+      createdAgent: 'codex', completedAgent: 'other', completedAt: issue.updatedAt };
+    const agentNotes = notes.map(note => ({ ...note, agent: 'codex' }));
+    for (const output of [issueList([attributed], false, project, {}, width), issueDetail(attributed, agentNotes, width)]) {
+      for (const line of output.split('\n')) assert.ok(displayWidth(line) <= width, `${width}: ${line}`);
+      assert.equal((output.match(/◆/g) ?? []).length, (output.match(/◆ AI/g) ?? []).length);
+      assert.doesNotMatch(output, /\u00a0/);
+    }
+  }
+});
+
+test('AI badge uses Nord12 RGB and follows the existing color policy', () => {
+  assert.equal(aiBadge(pc.createColors(true)), '\x1b[38;2;208;135;112m◆ AI\x1b[39m');
+  assert.equal(aiBadge(pc.createColors(false)), '◆ AI');
+  assert.equal(aiBadge(terminalColors({ isTTY: false })), '◆ AI');
+  const before = process.env.NO_COLOR;
+  try {
+    process.env.NO_COLOR = '1';
+    assert.equal(aiBadge(terminalColors({ isTTY: true })), '◆ AI');
+  } finally {
+    if (before === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = before;
+  }
 });
 
 test('detail preserves paragraphs and indentation with chronological timeline notes', () => {

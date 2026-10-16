@@ -1,6 +1,13 @@
 import type { Db } from '../db/database.js';
 import * as queries from '../db/issues.js';
-import type { Issue, IssueFilter, IssueInput, Priority } from './model.js';
+import type { Attribution, Issue, IssueFilter, IssueInput, Priority } from './model.js';
+
+export function attribution(value: Attribution = {}): Attribution {
+  const agent = value.agent === undefined ? undefined : requiredText(value.agent, 'Agent');
+  const session = value.session === undefined ? undefined : requiredText(value.session, 'Session');
+  if (session !== undefined && agent === undefined) throw new Error('--session requires --agent.');
+  return { agent, session };
+}
 
 export function requiredText(value: string, label: string): string {
   const trimmed = value.trim();
@@ -32,11 +39,11 @@ export function listIssues(db: Db, filter: IssueFilter = {}) {
   return queries.listIssues(db, filter);
 }
 
-export function createIssue(db: Db, projectId: number, input: IssueInput, commit: string | null) {
+export function createIssue(db: Db, projectId: number, input: IssueInput, commit: string | null, author: Attribution = {}) {
   const title = titleText(input.title);
   if (input.priority) priority(input.priority);
   return queries.insertIssue(db, projectId, { ...input, title, description: input.description || null },
-    commit, new Date().toISOString());
+    commit, new Date().toISOString(), attribution(author));
 }
 
 export function editIssue(db: Db, issue: Issue, patch: Partial<IssueInput>) {
@@ -48,16 +55,16 @@ export function editIssue(db: Db, issue: Issue, patch: Partial<IssueInput>) {
   return queries.updateIssue(db, issue, validated, new Date().toISOString());
 }
 
-export function completeIssue(db: Db, issue: Issue, commit: string | null) {
-  return queries.setStatus(db, issue, 'done', commit, new Date().toISOString());
+export function completeIssue(db: Db, issue: Issue, commit: string | null, author: Attribution = {}) {
+  return queries.setStatus(db, issue, 'done', commit, new Date().toISOString(), attribution(author));
 }
 
 export function reopenIssue(db: Db, issue: Issue) {
   return queries.setStatus(db, issue, 'open', null, new Date().toISOString());
 }
 
-export function addNote(db: Db, issue: Issue, content: string) {
-  return queries.insertNote(db, issue, requiredText(content, 'Note'), new Date().toISOString());
+export function addNote(db: Db, issue: Issue, content: string, author: Attribution = {}) {
+  return queries.insertNote(db, issue, requiredText(content, 'Note'), new Date().toISOString(), attribution(author));
 }
 
 export { issueNotes, deleteIssue, exportData } from '../db/issues.js';

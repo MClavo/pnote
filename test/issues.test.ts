@@ -102,3 +102,72 @@ test('titles reject newlines on create and edit while descriptions and notes ret
   assert.equal(issue.description, 'first\nsecond');
   assert.equal(issues.addNote(db, issue, 'first\nsecond').content, 'first\nsecond');
 });
+
+test('creation, notes, and closure have independent optional attribution and export it', t => {
+  const db = memoryDb(t);
+  const project = createProject(db, 'a', null, '/a');
+  const created = issues.createIssue(db, project.id, { title: 'Agent creation' }, null,
+    { agent: ' openai:gpt-6.1 ', session: ' session:create ' });
+  assert.equal(created.createdAgent, 'openai:gpt-6.1');
+  assert.equal(created.createdSession, 'session:create');
+  assert.equal(created.completedAgent, null);
+  assert.equal(created.completedSession, null);
+  const humanNote = issues.addNote(db, created, 'Human note');
+  assert.equal(humanNote.agent, null);
+  assert.equal(humanNote.session, null);
+  const agentNote = issues.addNote(db, created, 'Agent note', { agent: 'arbitrary:provider/model', session: 'session:note' });
+  assert.equal(agentNote.agent, 'arbitrary:provider/model');
+  assert.equal(agentNote.session, 'session:note');
+  const edited = issues.editIssue(db, created, { title: 'Edited by a human' });
+  assert.equal(edited.createdAgent, created.createdAgent);
+  assert.equal(edited.createdSession, created.createdSession);
+  const completed = issues.completeIssue(db, edited, null);
+  assert.equal(completed.completedAgent, null);
+  assert.equal(completed.completedSession, null);
+  const exported = issues.exportData(db, project.id);
+  assert.deepEqual(Object.keys(exported), ['projects', 'paths', 'issues', 'notes']);
+  assert.equal(exported.issues[0]!.createdAgent, 'openai:gpt-6.1');
+  assert.equal(exported.issues[0]!.createdSession, 'session:create');
+  assert.equal('hasAgentActivity' in exported.issues[0]!, false);
+  assert.deepEqual(exported.notes, [humanNote, agentNote]);
+  assert.deepEqual(issues.exportData(db).notes, exported.notes);
+});
+
+test('closure attribution is idempotent, cleared on reopen, and never inherited', t => {
+  const db = memoryDb(t);
+  const project = createProject(db, 'a', null, '/a');
+  const original = issues.createIssue(db, project.id, { title: 'Human creation' }, null);
+  assert.equal(original.createdAgent, null);
+  assert.equal(original.createdSession, null);
+  const completed = issues.completeIssue(db, original, 'a'.repeat(40), { agent: 'codex', session: 'first' });
+  assert.equal(completed.completedAgent, 'codex');
+  assert.equal(completed.completedSession, 'first');
+  // A stale competing caller cannot replace the successful closure's attribution.
+  assert.deepEqual(issues.completeIssue(db, original, 'b'.repeat(40), { agent: 'other', session: 'second' }), completed);
+  assert.deepEqual(issues.completeIssue(db, completed, null), completed);
+  const reopened = issues.reopenIssue(db, completed);
+  assert.equal(reopened.completedAgent, null);
+  assert.equal(reopened.completedSession, null);
+  assert.deepEqual(issues.reopenIssue(db, completed), reopened);
+  const humanCompletion = issues.completeIssue(db, reopened, null);
+  assert.equal(humanCompletion.completedAgent, null);
+  assert.equal(humanCompletion.completedSession, null);
+  assert.equal(issues.listIssues(db)[0]!.hasAgentActivity, false);
+  const next = issues.completeIssue(db, issues.reopenIssue(db, humanCompletion), null, { agent: 'other' });
+  assert.equal(next.completedAgent, 'other');
+  assert.equal(next.completedSession, null);
+});
+
+test('invalid attribution is rejected before issue, note, or closure writes', t => {
+  const db = memoryDb(t);
+  const project = createProject(db, 'a', null, '/a');
+  const original = issues.createIssue(db, project.id, { title: 'Keep' }, null);
+  for (const author of [{ agent: ' ' }, { agent: 'codex', session: ' ' }, { session: 'orphan' }]) {
+    assert.throws(() => issues.createIssue(db, project.id, { title: 'Rejected' }, null, author), /empty|requires/);
+    assert.throws(() => issues.addNote(db, original, 'Rejected', author), /empty|requires/);
+    assert.throws(() => issues.completeIssue(db, original, null, author), /empty|requires/);
+  }
+  assert.deepEqual(issues.getIssue(db, project.id, 1), original);
+  assert.deepEqual(issues.issueNotes(db, original.id), []);
+  assert.equal(issues.createIssue(db, project.id, { title: 'Next' }, null).number, 2);
+});

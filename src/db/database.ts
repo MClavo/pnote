@@ -58,6 +58,12 @@ const migrations = [
   CREATE INDEX projects_remote ON projects(remote);
   CREATE INDEX paths_project ON project_paths(projectId);
   CREATE INDEX issues_listing ON issues(projectId, status, createdAt);`,
+  `ALTER TABLE issues ADD COLUMN createdAgent TEXT;
+  ALTER TABLE issues ADD COLUMN createdSession TEXT;
+  ALTER TABLE issues ADD COLUMN completedAgent TEXT;
+  ALTER TABLE issues ADD COLUMN completedSession TEXT;
+  ALTER TABLE notes ADD COLUMN agent TEXT;
+  ALTER TABLE notes ADD COLUMN session TEXT;`,
 ];
 
 export function openDatabase(filename = databasePath()): Db {

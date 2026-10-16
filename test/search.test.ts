@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addNote, completeIssue, createIssue, listIssues } from '../src/core/issues.js';
+import { addNote, completeIssue, createIssue, listIssues, reopenIssue } from '../src/core/issues.js';
 import { createProject } from '../src/db/projects.js';
 import { memoryDb } from './helpers.js';
 
@@ -13,6 +13,25 @@ test('search ANDs terms across title and description, ignoring notes', t => {
   assert.deepEqual(listIssues(db, { search: '  SNAPSHOT   recovery  ' }).map(i => i.id), [match.id]);
   assert.deepEqual(listIssues(db, { search: 'Recovery Snapshot' }).map(i => i.id), [match.id]);
   assert.deepEqual(listIssues(db, { search: 'missing' }), []);
+});
+
+test('listing activity is derived from retained creation, closure, and note attribution', t => {
+  const db = memoryDb(t);
+  const project = createProject(db, 'a', null, '/a');
+  const human = createIssue(db, project.id, { title: 'Human' }, null);
+  const creation = createIssue(db, project.id, { title: 'Creation' }, null, { agent: 'codex' });
+  const note = createIssue(db, project.id, { title: 'Note' }, null);
+  addNote(db, note, 'Agent activity', { agent: 'other' });
+  addNote(db, note, 'Later human activity');
+  const closure = completeIssue(db, createIssue(db, project.id, { title: 'Closure' }, null), null, { agent: 'other' });
+  const listed = new Map(listIssues(db).map(issue => [issue.id, issue.hasAgentActivity]));
+  assert.equal(listed.get(human.id), false);
+  for (const issue of [creation, note, closure]) assert.equal(listed.get(issue.id), true);
+  assert.equal(listIssues(db, { search: 'Note', status: 'open', projectId: project.id })[0]!.hasAgentActivity, true);
+  const reopened = reopenIssue(db, closure);
+  assert.equal(listIssues(db, { search: 'Closure' })[0]!.hasAgentActivity, false);
+  completeIssue(db, reopened, null);
+  assert.equal(listIssues(db, { search: 'Closure' })[0]!.hasAgentActivity, false);
 });
 
 test('search supports Unicode lowercasing and literal LIKE characters', t => {

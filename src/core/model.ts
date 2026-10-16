@@ -26,10 +26,16 @@ export interface Issue {
   completedAt: string | null;
   createdCommit: string | null;
   completedCommit: string | null;
+  createdAgent: string | null;
+  createdSession: string | null;
+  completedAgent: string | null;
+  completedSession: string | null;
 }
 
 export interface IssueSummary extends Issue {
   projectName: string;
+  // Computed for terminal listings only; never persisted.
+  hasAgentActivity?: boolean;
 }
 
 export interface Note {
@@ -37,6 +43,13 @@ export interface Note {
   issueId: number;
   content: string;
   createdAt: string;
+  agent: string | null;
+  session: string | null;
+}
+
+export interface Attribution {
+  agent?: string;
+  session?: string;
 }
 
 export interface IssueFilter {

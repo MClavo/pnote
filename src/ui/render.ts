@@ -1,7 +1,13 @@
 import type { IssueSummary, Note, Priority, Project, ProjectPath, Status } from '../core/model.js';
 import { clean, displayWidth, pad, terminalWidth, wrap } from './layout.js';
 
-import { color, priorityColor as level } from './theme.js';
+import { aiBadge, color, priorityColor as level } from './theme.js';
+
+function markAI(line: string, agent: boolean, format = (value: string) => value): string {
+  // A nonbreaking space keeps the generated badge together while wrapping.
+  return agent && line.endsWith('◆\u00a0AI')
+    ? format(line.slice(0, -4)) + aiBadge() : format(line);
+}
 
 function timestamp(value: string): string {
   const date = new Date(value);
@@ -55,7 +61,9 @@ export function issueList(issues: IssueSummary[], all: boolean, project?: Projec
   const label = (issue: IssueSummary) => all ? reference(issue) : `#${issue.number}`;
   const referenceWidth = Math.max(5, ...issues.map(issue => displayWidth(label(issue))));
   const dateWidth = Math.max(7, ...issues.map(issue => displayWidth(shortDate(issue.createdAt))));
-  const titleWidth = Math.min(Math.max(20, ...issues.map(issue => displayWidth(clean(issue.title)))),
+  const hasAgent = (issue: IssueSummary) => Boolean(issue.hasAgentActivity || issue.createdAgent || issue.completedAgent);
+  const titleText = (issue: IssueSummary) => clean(issue.title) + (hasAgent(issue) ? ' ◆\u00a0AI' : '');
+  const titleWidth = Math.min(Math.max(20, ...issues.map(issue => displayWidth(titleText(issue)))),
     width - (2 + referenceWidth + 2 + 8 + 2 + 2 + dateWidth));
   const stacked = titleWidth < 20;
   let hasHeader = false;
@@ -73,9 +81,9 @@ export function issueList(issues: IssueSummary[], all: boolean, project?: Projec
         lines.push(...wrap(label(issue), width - 2).map(line => `  ${color.cyan(line)}`),
           ...wrap(`${issue.priority} · created ${shortDate(issue.createdAt)}`, width - 2)
             .map(line => `  ${color.dim(line)}`),
-          ...wrap(clean(issue.title), width - 2).map(line => `  ${line}`));
+          ...wrap(titleText(issue), width - 2).map(line => `  ${markAI(line, hasAgent(issue))}`));
       } else {
-        const title = wrap(clean(issue.title), titleWidth);
+        const title = wrap(titleText(issue), titleWidth).map(line => markAI(line, hasAgent(issue)));
         lines.push(`  ${pad(color.cyan(label(issue)), referenceWidth)}  ${pad(level(issue.priority), 8)}  ${pad(title[0]!, titleWidth)}  ${color.dim(shortDate(issue.createdAt))}`,
           ...title.slice(1).map(line => `${' '.repeat(2 + referenceWidth + 2 + 8 + 2)}${line}`));
       }
@@ -97,31 +105,31 @@ export function issueDetail(issue: IssueSummary, notes: Note[] = [], width = ter
   else {
     lines.push(color.dim('  │'));
     for (const note of notes) {
-      const dates = wrap(timestamp(note.createdAt), width - 4);
-      lines.push(`  ${color.cyan('●')} ${color.dim(dates[0]!)}`,
-        ...dates.slice(1).map(line => `  ${color.dim('│')} ${color.dim(line)}`),
+      const dates = wrap(timestamp(note.createdAt) + (note.agent ? ' ◆\u00a0AI' : ''), width - 4);
+      lines.push(`  ${color.cyan('●')} ${markAI(dates[0]!, Boolean(note.agent), color.dim)}`,
+        ...dates.slice(1).map(line => `  ${color.dim('│')} ${markAI(line, Boolean(note.agent), color.dim)}`),
         ...wrap(clean(note.content, true), width - 4).map(line => `  ${color.dim('│')} ${line}`),
         color.dim('  │'));
     }
     lines[lines.length - 1] = color.dim('  ╵');
   }
   lines.push('');
-  const field = (label: string, value: string) => {
-    lines.push(...wrap(`${pad(label, 19)}${value}`, width).map(line => color.dim(line)));
+  const field = (label: string, value: string, agent = false) => {
+    lines.push(...wrap(`${pad(label, 19)}${value}${agent ? ' ◆\u00a0AI' : ''}`, width).map(line => markAI(line, agent, color.dim)));
   };
-  field('Created', timestamp(issue.createdAt));
+  field('Created', timestamp(issue.createdAt), Boolean(issue.createdAgent));
   field('Updated', timestamp(issue.updatedAt));
   if (issue.createdCommit) field('Git at creation', issue.createdCommit.slice(0, 8));
-  if (issue.completedAt) field('Completed', timestamp(issue.completedAt));
+  if (issue.completedAt) field('Completed', timestamp(issue.completedAt), Boolean(issue.completedAgent));
   if (issue.completedCommit) field('Git at completion', issue.completedCommit.slice(0, 8));
   return lines.join('\n');
 }
 
-export function issueAction(action: string, issue: IssueSummary, detail?: string): string {
+export function issueAction(action: string, issue: IssueSummary, detail?: string, agent = false): string {
   const ref = reference(issue);
-  return wrap(`✓ ${action} ${ref} · ${clean(detail ?? issue.title)}`, terminalWidth())
+  return wrap(`✓ ${action} ${ref} · ${clean(detail ?? issue.title)}${agent ? ' ◆\u00a0AI' : ''}`, terminalWidth())
     .map((line, index) => {
-      const styled = line.replace(ref, () => color.cyan(ref));
+      const styled = markAI(line.replace(ref, () => color.cyan(ref)), agent);
       return index === 0
         ? color.green(styled.slice(0, 1)) + styled.slice(1).replace(action, () => color.bold(color.green(action)))
         : styled;
@@ -175,8 +183,8 @@ export function projectList(projects: Project[]): string {
 }
 
 export function noteAdded(issue: IssueSummary, note: Note): string {
-  return [...wrap(`✓ Note added to ${reference(issue)}`, terminalWidth()).map(line =>
-    line.replace('✓', () => color.green('✓')).replace('Note added to', () => color.bold(color.green('Note added to')))
+  return [...wrap(`✓ Note added to ${reference(issue)}${note.agent ? ' ◆\u00a0AI' : ''}`, terminalWidth()).map(line =>
+    markAI(line, Boolean(note.agent)).replace('✓', () => color.green('✓')).replace('Note added to', () => color.bold(color.green('Note added to')))
       .replace(reference(issue), () => color.cyan(reference(issue)))),
     ...wrap(clean(note.content, true), terminalWidth() - 2).map(line => `  ${line}`)].join('\n');
 }

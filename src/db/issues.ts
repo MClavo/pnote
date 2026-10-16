@@ -1,5 +1,5 @@
 import type { Db } from './database.js';
-import type { ExportData, Issue, IssueFilter, IssueInput, IssueSummary, Note, Project, ProjectPath } from '../core/model.js';
+import type { Attribution, ExportData, Issue, IssueFilter, IssueInput, IssueSummary, Note, Project, ProjectPath } from '../core/model.js';
 
 export function getIssue(db: Db, projectId: number, number: number): IssueSummary | undefined {
   return db.prepare(`SELECT issues.*, projects.name AS projectName FROM issues
@@ -27,21 +27,26 @@ export function listIssues(db: Db, filter: IssueFilter = {}): IssueSummary[] {
     const pattern = `%${term.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`;
     parameters.push(pattern, pattern);
   }
-  return db.prepare(`SELECT issues.*, projects.name AS projectName FROM issues
+  const rows = db.prepare(`SELECT issues.*, projects.name AS projectName,
+    (issues.createdAgent IS NOT NULL OR issues.completedAgent IS NOT NULL OR
+      EXISTS (SELECT 1 FROM notes WHERE notes.issueId = issues.id AND notes.agent IS NOT NULL)) AS hasAgentActivity
+    FROM issues
     JOIN projects ON projects.id = issues.projectId
     ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
     ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, createdAt DESC, issues.id DESC`)
-    .all(...parameters) as IssueSummary[];
+    .all(...parameters) as (Omit<IssueSummary, 'hasAgentActivity'> & { hasAgentActivity: number })[];
+  return rows.map(row => ({ ...row, hasAgentActivity: Boolean(row.hasAgentActivity) }));
 }
 
-export function insertIssue(db: Db, projectId: number, input: IssueInput, commit: string | null, now: string): IssueSummary {
+export function insertIssue(db: Db, projectId: number, input: IssueInput, commit: string | null, now: string, author: Attribution = {}): IssueSummary {
   return db.transaction(() => {
     const counter = db.prepare(`UPDATE projects SET nextIssueNumber = nextIssueNumber + 1
       WHERE id = ? RETURNING nextIssueNumber - 1 AS number`).get(projectId) as { number: number } | undefined;
     if (!counter) throw new Error(`Project ID ${projectId} does not exist.`);
-    db.prepare(`INSERT INTO issues(projectId, number, title, description, priority, createdAt, updatedAt, createdCommit)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    db.prepare(`INSERT INTO issues(projectId, number, title, description, priority, createdAt, updatedAt, createdCommit,
+      createdAgent, createdSession) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       projectId, counter.number, input.title, input.description ?? null, input.priority ?? 'low', now, now, commit,
+      author.agent ?? null, author.session ?? null,
     );
     return getIssue(db, projectId, counter.number)!;
   }).immediate();
@@ -54,11 +59,13 @@ export function updateIssue(db: Db, issue: Issue, patch: Partial<IssueInput>, no
   return getIssue(db, issue.projectId, issue.number)!;
 }
 
-export function setStatus(db: Db, issue: Issue, status: 'open' | 'done', commit: string | null, now: string): IssueSummary {
+export function setStatus(db: Db, issue: Issue, status: 'open' | 'done', commit: string | null, now: string, author: Attribution = {}): IssueSummary {
   // The WHERE clause preserves timestamps even when two processes complete the same issue.
-  db.prepare(`UPDATE issues SET status = ?, updatedAt = ?, completedAt = ?, completedCommit = ?
+  db.prepare(`UPDATE issues SET status = ?, updatedAt = ?, completedAt = ?, completedCommit = ?,
+    completedAgent = ?, completedSession = ?
     WHERE id = ? AND status != ?`).run(status, now, status === 'done' ? now : null,
-      status === 'done' ? commit : null, issue.id, status);
+      status === 'done' ? commit : null, status === 'done' ? author.agent ?? null : null,
+      status === 'done' ? author.session ?? null : null, issue.id, status);
   return getIssue(db, issue.projectId, issue.number)!;
 }
 
@@ -66,10 +73,10 @@ export function issueNotes(db: Db, issueId: number): Note[] {
   return db.prepare('SELECT * FROM notes WHERE issueId = ? ORDER BY createdAt, id').all(issueId) as Note[];
 }
 
-export function insertNote(db: Db, issue: Issue, content: string, now: string): Note {
+export function insertNote(db: Db, issue: Issue, content: string, now: string, author: Attribution = {}): Note {
   return db.transaction(() => {
-    const result = db.prepare('INSERT INTO notes(issueId, content, createdAt) VALUES (?, ?, ?)')
-      .run(issue.id, content, now);
+    const result = db.prepare('INSERT INTO notes(issueId, content, createdAt, agent, session) VALUES (?, ?, ?, ?, ?)')
+      .run(issue.id, content, now, author.agent ?? null, author.session ?? null);
     db.prepare('UPDATE issues SET updatedAt = ? WHERE id = ?').run(now, issue.id);
     return db.prepare('SELECT * FROM notes WHERE id = ?').get(result.lastInsertRowid) as Note;
   }).immediate();

@@ -20,6 +20,8 @@ interface Options {
   title?: string;
   description?: string;
   priority?: string;
+  agent?: string;
+  session?: string;
 }
 
 async function main(): Promise<void> {
@@ -69,6 +71,15 @@ async function main(): Promise<void> {
       .option('-p, --priority <priority>', 'Filter by low, normal, or high priority', issues.priority);
   }
 
+  function agentOptions(cmd: Command): Command {
+    const agent = cmd.createOption('--agent <identifier>', 'Attribute this action to an agent');
+    // Commander parses exact aliases, but its constructor only accepts single-letter short flags.
+    agent.short = '-ag';
+    agent.flags = '-ag, --agent <identifier>';
+    return cmd.addOption(agent)
+      .option('-s, --session <id>', 'Agent session ID; requires --agent');
+  }
+
   async function list(options: Options, search?: string): Promise<void> {
     if (options.open && options.done) throw new Error('--open and --done are mutually exclusive.');
     const project = options.all ? undefined : await currentProject(options);
@@ -77,24 +88,25 @@ async function main(): Promise<void> {
       status: options.open ? 'open' : options.done ? 'done' : undefined, search,
     };
     const result = issues.listIssues(db(), filter);
-    output(options, result, () => render.issueList(result, Boolean(options.all), project, {
+    output(options, result.map(({ hasAgentActivity, ...issue }) => issue), () => render.issueList(result, Boolean(options.all), project, {
       search, status: filter.status, priority: filter.priority,
     }));
   }
 
   listOptions(command('ls', 'List issues', true)).action((options: Options) => list(options));
 
-  command('add [title]', 'Create an issue')
+  agentOptions(command('add [title]', 'Create an issue'))
     .option('-p, --priority <priority>', 'low, normal, or high', issues.priority)
     .option('--description <text>', 'Issue description')
     .action(async (value: string | undefined, options: Options) => {
+      const author = issues.attribution(options);
       const title = await input(value, 'Title', options);
       const project = await currentProject(options);
       const issue = issues.createIssue(db(), project.id, {
         title, description: options.description,
         priority: options.priority ? issues.priority(options.priority) : undefined,
-      }, gitHead(cwd));
-      output(options, issue, () => render.issueAction('Created', issue, `${issue.title} [${issue.priority}]`));
+      }, gitHead(cwd), author);
+      output(options, issue, () => render.issueAction('Created', issue, `${issue.title} [${issue.priority}]`, issue.createdAgent !== null));
     });
 
   command('show [reference]', 'Show issue details and notes')
@@ -123,11 +135,12 @@ async function main(): Promise<void> {
       output(options, result, () => render.issueEdited(issue, result));
     });
 
-  command('note [reference] [text]', 'Append a timestamped note')
+  agentOptions(command('note [reference] [text]', 'Append a timestamped note'))
     .action(async (reference: string | undefined, value: string | undefined, options: Options) => {
+      const author = issues.attribution(options);
       const content = await input(value, 'Note text', options, true);
       const issue = await issueFrom(reference, options);
-      const note = issues.addNote(db(), issue, content);
+      const note = issues.addNote(db(), issue, content, author);
       output(options, note, () => render.noteAdded(issue, note));
     });
 
@@ -137,12 +150,13 @@ async function main(): Promise<void> {
       await list(options, query);
     });
 
-  command('done [reference]', 'Complete an issue')
+  agentOptions(command('done [reference]', 'Complete an issue'))
     .action(async (reference: string | undefined, options: Options) => {
+      const author = issues.attribution(options);
       const issue = await issueFrom(reference, options);
-      const result = issues.completeIssue(db(), issue, gitHead(cwd));
+      const result = issues.completeIssue(db(), issue, gitHead(cwd), author);
       output(options, result, () => issue.status === result.status
-        ? render.unchanged(result) : render.issueAction('Completed', result));
+        ? render.unchanged(result) : render.issueAction('Completed', result, undefined, result.completedAgent !== null));
     });
 
   command('reopen [reference]', 'Reopen a completed issue')

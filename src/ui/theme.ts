@@ -9,6 +9,10 @@ export function terminalColors(stream: { isTTY?: boolean }) {
 export const color = terminalColors(process.stdout);
 export const errorColor = terminalColors(process.stderr);
 
+export function aiBadge(colors = color): string {
+  return colors.isColorSupported ? '\x1b[38;2;208;135;112m◆ AI\x1b[39m' : '◆ AI';
+}
+
 export function priorityColor(value: Priority): string {
   return value === 'high' ? color.red(value) : value === 'normal' ? color.yellow(value) : color.dim(value);
 }

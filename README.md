@@ -55,6 +55,8 @@ Place flags after the command. For the default list, `pno -o` is equivalent to `
 | Short | Long | Available on | Meaning |
 | --- | --- | --- | --- |
 | `-a` | `--all` | `ls`, `search`, `export` | Include all projects |
+| `-ag <identifier>` | `--agent <identifier>` | `add`, `note`, `done` | Attribute this action to an agent |
+| `-s <id>` | `--session <id>` | `add`, `note`, `done` | Associate an agent session; requires `--agent` |
 | `-o` | `--open` | `ls`, `search` | Only open issues |
 | `-d` | `--done` | `ls`, `search` | Only completed issues |
 | `-p <value>` | `--priority <value>` | `add`, `edit`, `ls`, `search` | Set or filter priority: `low`, `normal`, `high` |
@@ -74,6 +76,16 @@ pno edit 1 --description ""
 pno search "recovery restart" -a
 pno rm 1 -f
 ```
+
+Agent attribution is optional and supplied explicitly for each action. Any nonblank agent identifier or session ID is accepted; surrounding whitespace is trimmed. Without `--agent`, the action is human-authored and does not inherit attribution from the issue or earlier actions. `--session` requires `--agent`. PNote does not detect agents automatically.
+
+```sh
+pno add "Investigate recovery" --agent codex --session run-123
+pno note 1 "Found the cause" -ag openai:gpt-6.1 -s run-123
+pno done 1 --agent codex
+```
+
+Agent-authored creation, notes, and completion show only `◆ AI` in Nord12 orange (`#D08770`), or plain text when colors are disabled. Lists and search show the badge when the currently stored creation, closure, or any note has agent attribution; the badge indicates activity, not ownership. Agent identifiers and session IDs are available in JSON and exports, but are not shown as attribution in normal terminal output.
 
 ## Projects and issue numbers
 
@@ -126,6 +138,8 @@ pno export -aj > all-projects.json
 IDs in JSON are internal relational keys; CLI references use `number`. Export includes those keys to preserve relationships. Dates are UTC ISO 8601 strings; terminal dates use local time. Optional stored fields are `null`.
 Export requires `--json`; importing data is not supported.
 
+Issues include nullable `createdAgent`, `createdSession`, `completedAgent`, and `completedSession` fields. Notes include nullable `agent` and `session` fields. These fields are preserved in JSON exports alongside the existing fields; export retains its `projects`, `paths`, `issues`, and `notes` arrays. Existing databases migrate automatically, with attribution set to `null` for existing records.
+
 ## Storage and recognition
 
 - Windows: `%LOCALAPPDATA%\pnote\pnote.db` (falls back to the user's `AppData\Local`).
@@ -135,6 +149,8 @@ Export requires `--json`; importing data is not supported.
 The closest known directory association wins, then the exact Git `origin` remote, then an unambiguous repository/directory name. Git repositories use their root directory; other projects use the current directory. Otherwise a project is created. Changing a remote or initializing Git later preserves known associations and refreshes the stored origin remote on the next command that resolves the current project. Removing origin clears the stored remote; unavailable Git leaves it unchanged. `project link` explicitly associates the current directory; subdirectories inherit the nearest association.
 
 Creation and completion record the calling directory's full Git HEAD if available, including when completing an explicit cross-project reference. These are snapshots of the calling repository, not proof that a commit implemented the issue. Reopening clears completion metadata; repeating completion or reopening leaves existing metadata intact.
+
+Reopening also clears closure agent and session attribution. Completing again records only the new closure's attribution. Previous closures are not retained, so reopening can remove an issue's AI badge if its closure was the only stored agent activity. Creation and note attribution remain unchanged.
 
 `pno project` and `pno project link` always show the project, associated paths, and origin remote. When no remote is configured, the Remote field displays “No remote configured”, including for directories without Git.
 
